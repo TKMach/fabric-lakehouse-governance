@@ -1,0 +1,76 @@
+{
+  "name": "pl_portal_metadata_copy",
+  "properties": {
+    "description": "Metadata-driven ingestion from the operational Azure SQL database into Bronze. Adding a source table is a row in ops.ingestion_control, not a pipeline change. Sanitised export.",
+    "parameters": {
+      "pipeline_run_id": { "type": "string", "defaultValue": "@pipeline().RunId" }
+    },
+    "activities": [
+      {
+        "name": "LookupIngestionControl",
+        "type": "Lookup",
+        "description": "Read enabled entities: source query, target table, load mode.",
+        "typeProperties": {
+          "source": {
+            "type": "LakehouseTableSource",
+            "query": "SELECT entity, source_query, target_table, load_mode FROM ops.ingestion_control WHERE enabled = 1 ORDER BY load_order"
+          },
+          "firstRowOnly": false
+        },
+        "policy": { "timeout": "0.00:10:00", "retry": 2, "retryIntervalInSeconds": 60 }
+      },
+      {
+        "name": "ForEachEntity",
+        "type": "ForEach",
+        "dependsOn": [ { "activity": "LookupIngestionControl", "dependencyConditions": [ "Succeeded" ] } ],
+        "typeProperties": {
+          "items": { "value": "@activity('LookupIngestionControl').output.value", "type": "Expression" },
+          "isSequential": false,
+          "batchCount": 4,
+          "activities": [
+            {
+              "name": "CopyEntityToBronze",
+              "type": "Copy",
+              "typeProperties": {
+                "source": {
+                  "type": "AzureSqlSource",
+                  "sqlReaderQuery": { "value": "@item().source_query", "type": "Expression" },
+                  "queryTimeout": "02:00:00"
+                },
+                "sink": {
+                  "type": "LakehouseTableSink",
+                  "tableActionOption": { "value": "@item().load_mode", "type": "Expression" }
+                },
+                "additionalColumns": [
+                  { "name": "_source",      "value": { "value": "@item().entity", "type": "Expression" } },
+                  { "name": "_run_id",      "value": { "value": "@pipeline().parameters.pipeline_run_id", "type": "Expression" } },
+                  { "name": "_ingested_at", "value": { "value": "@utcnow()", "type": "Expression" } }
+                ]
+              },
+              "policy": { "timeout": "0.02:00:00", "retry": 1, "retryIntervalInSeconds": 120 }
+            },
+            {
+              "name": "LogEntityRun",
+              "type": "Script",
+              "dependsOn": [ { "activity": "CopyEntityToBronze", "dependencyConditions": [ "Completed" ] } ],
+              "description": "Write rows read/written, status and run id to ops.run_log for SOP-01.",
+              "typeProperties": {
+                "scripts": [ { "type": "NonQuery", "text": { "value": "INSERT INTO ops.run_log (run_id, entity, status, rows_read, rows_written, logged_at) VALUES ('@{pipeline().parameters.pipeline_run_id}', '@{item().entity}', '@{activity('CopyEntityToBronze').Status}', @{coalesce(activity('CopyEntityToBronze').output.rowsRead, 0)}, @{coalesce(activity('CopyEntityToBronze').output.rowsCopied, 0)}, '@{utcnow()}')", "type": "Expression" } } ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "TransformAndGate",
+        "type": "TridentNotebook",
+        "dependsOn": [ { "activity": "ForEachEntity", "dependencyConditions": [ "Succeeded" ] } ],
+        "description": "Silver/Gold build + DQ gate (nb_transform_silver_gold). Fails the run if an error-level check fails.",
+        "typeProperties": {
+          "notebookId": "<nb_transform_silver_gold>",
+          "parameters": { "pipeline_run_id": { "value": "@pipeline().RunId", "type": "string" } }
+        }
+      }
+    ]
+  }
+}

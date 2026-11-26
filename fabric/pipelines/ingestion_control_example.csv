@@ -1,0 +1,4 @@
+entity,source_query,target_table,load_mode,load_order,enabled
+portal_businesses,"SELECT business_guid, proj_num, business_name FROM ops.businesses",bronze.portal_businesses,Overwrite,1,1
+portal_business_programmes,"SELECT business_guid, programme_id, participation_status, start_period_key, exit_period_key FROM ops.business_programmes",bronze.portal_business_programmes,Overwrite,2,1
+portal_sustainability_kpis,"SELECT * FROM reporting.vw_sustainability_answers",bronze.portal_sustainability_kpis,Overwrite,3,1

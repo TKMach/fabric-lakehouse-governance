@@ -1,0 +1,20 @@
+{
+  "seed": 42,
+  "periods": [
+    202606,
+    202607,
+    202608,
+    202609
+  ],
+  "expected": {
+    "missing": 27,
+    "all_null": 17,
+    "fin_partial": 5,
+    "jobs_partial": 11,
+    "jobs_all_null": 17,
+    "revised": 19,
+    "eligible_rows": 432,
+    "null_to_zero_businesses_202609": 8,
+    "unmatched": 1
+  }
+}
